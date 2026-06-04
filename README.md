@@ -29,20 +29,20 @@ This repo is ready for Posit Connect as a Dash app.
 Required environment variables in Posit Connect:
 
 ```text
-BENEFITS_VIEWER_CLIENT_ID
-BENEFITS_VIEWER_CLIENT_SECRET
-BENEFITS_VIEWER_APP_URL
+CLIENT_ID
+CLIENT_SECRET
+APP_URL
 ```
 
 If the first publish opens with a missing configuration message, add those
 environment variables in the Posit Connect content settings and republish or
-restart the app. `BENEFITS_VIEWER_APP_URL` should be the public URL for this
-deployed Posit content.
+restart the app. `APP_URL` should be the public URL for this deployed Posit
+content.
 
 Optional environment variables:
 
 ```text
-BENEFITS_VIEWER_SITE=https://apps.csipacific.ca
+SITE_URL=https://apps.csipacific.ca
 BENEFITS_VIEWER_AUTH_URL=https://apps.csipacific.ca/o/authorize
 BENEFITS_VIEWER_TOKEN_URL=https://apps.csipacific.ca/o/token/
 BENEFITS_VIEWER_BENEFITS_URL=https://apps.csipacific.ca/api/benefits/partners/
@@ -57,6 +57,6 @@ rsconnect deploy dash \
   .
 ```
 
-After the first publish, set `BENEFITS_VIEWER_APP_URL` to the public Posit
-Connect content URL and make sure the OAuth client redirect/callback URL uses
-that same deployed URL.
+After the first publish, set `APP_URL` to the public Posit Connect content URL
+and make sure the OAuth client redirect/callback URL uses that same deployed
+URL.

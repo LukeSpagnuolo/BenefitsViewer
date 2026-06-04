@@ -20,8 +20,20 @@ from dash_auth_external import DashAuthExternal
 from requests.exceptions import ConnectTimeout, ConnectionError, ReadTimeout
 
 
-def env(name, default=None):
-    return os.environ.get(name, default)
+def env(*names, default=None):
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return default
+
+
+def missing_config(required_options):
+    missing = []
+    for options in required_options:
+        if not any(os.environ.get(name) for name in options):
+            missing.append(" or ".join(options))
+    return missing
 
 
 # -------------------------------------------------------------------------
@@ -29,32 +41,32 @@ def env(name, default=None):
 # -------------------------------------------------------------------------
 
 REQUIRED_CONFIG = (
-    "BENEFITS_VIEWER_CLIENT_ID",
-    "BENEFITS_VIEWER_CLIENT_SECRET",
-    "BENEFITS_VIEWER_APP_URL",
+    ("BENEFITS_VIEWER_CLIENT_ID", "CLIENT_ID"),
+    ("BENEFITS_VIEWER_CLIENT_SECRET", "CLIENT_SECRET"),
+    ("BENEFITS_VIEWER_APP_URL", "APP_URL"),
 )
-MISSING_CONFIG = [name for name in REQUIRED_CONFIG if not os.environ.get(name)]
+MISSING_CONFIG = missing_config(REQUIRED_CONFIG)
 
-CLIENT_ID = env("BENEFITS_VIEWER_CLIENT_ID", "")
-CLIENT_SECRET = env("BENEFITS_VIEWER_CLIENT_SECRET", "")
+CLIENT_ID = env("BENEFITS_VIEWER_CLIENT_ID", "CLIENT_ID", default="")
+CLIENT_SECRET = env("BENEFITS_VIEWER_CLIENT_SECRET", "CLIENT_SECRET", default="")
 
 # Django site that hosts OAuth + API.
-SITE = env("BENEFITS_VIEWER_SITE", "https://apps.csipacific.ca").rstrip("/")
+SITE = env("BENEFITS_VIEWER_SITE", "SITE_URL", default="https://apps.csipacific.ca").rstrip("/")
 
 # Public URL where this Dash app is reachable. In Posit Connect, set this to
 # the content URL shown after publishing, without a trailing slash.
-APP_URL = env("BENEFITS_VIEWER_APP_URL", "http://127.0.0.1:8050").rstrip("/")
+APP_URL = env("BENEFITS_VIEWER_APP_URL", "APP_URL", default="http://127.0.0.1:8050").rstrip("/")
 
-AUTH_URL = env("BENEFITS_VIEWER_AUTH_URL", f"{SITE}/o/authorize")
-TOKEN_URL = env("BENEFITS_VIEWER_TOKEN_URL", f"{SITE}/o/token/")
-BENEFITS_URL = env("BENEFITS_VIEWER_BENEFITS_URL", f"{SITE}/api/benefits/partners/")
+AUTH_URL = env("BENEFITS_VIEWER_AUTH_URL", default=f"{SITE}/o/authorize")
+TOKEN_URL = env("BENEFITS_VIEWER_TOKEN_URL", default=f"{SITE}/o/token/")
+BENEFITS_URL = env("BENEFITS_VIEWER_BENEFITS_URL", default=f"{SITE}/api/benefits/partners/")
 
-PAGE_LIMIT = int(env("BENEFITS_VIEWER_PAGE_LIMIT", "50"))
-MAX_RETRIES = int(env("BENEFITS_VIEWER_MAX_RETRIES", "5"))
-BACKOFF_SEC = float(env("BENEFITS_VIEWER_BACKOFF_SEC", "1.5"))
+PAGE_LIMIT = int(env("BENEFITS_VIEWER_PAGE_LIMIT", default="50"))
+MAX_RETRIES = int(env("BENEFITS_VIEWER_MAX_RETRIES", default="5"))
+BACKOFF_SEC = float(env("BENEFITS_VIEWER_BACKOFF_SEC", default="1.5"))
 REQUEST_TIMEOUT = (
-    float(env("BENEFITS_VIEWER_CONNECT_TIMEOUT", "10")),
-    float(env("BENEFITS_VIEWER_READ_TIMEOUT", "90")),
+    float(env("BENEFITS_VIEWER_CONNECT_TIMEOUT", default="10")),
+    float(env("BENEFITS_VIEWER_READ_TIMEOUT", default="90")),
 )
 RETRYABLE_STATUSES = (502, 503, 504, 524)
 
@@ -260,7 +272,7 @@ def fetch_and_display(n_clicks):
 
 if __name__ == "__main__":
     app.run(
-        debug=env("BENEFITS_VIEWER_DEBUG", "true").lower() == "true",
-        host=env("HOST", "127.0.0.1"),
-        port=int(env("PORT", "8050")),
+        debug=env("BENEFITS_VIEWER_DEBUG", default="true").lower() == "true",
+        host=env("HOST", default="127.0.0.1"),
+        port=int(env("PORT", default="8050")),
     )

@@ -12,7 +12,7 @@ from app import app, env
 
 if __name__ == "__main__":
     app.run(
-        debug=env("BENEFITS_VIEWER_DEBUG", "true").lower() == "true",
-        host=env("HOST", "127.0.0.1"),
-        port=int(env("PORT", "8050")),
+        debug=env("BENEFITS_VIEWER_DEBUG", default="true").lower() == "true",
+        host=env("HOST", default="127.0.0.1"),
+        port=int(env("PORT", default="8050")),
     )
