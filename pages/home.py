@@ -4,7 +4,7 @@ from datetime import datetime
 
 import dash
 import dash_bootstrap_components as dbc
-from dash import Input, Output, State, dash_table, dcc, html
+from dash import Input, Output, State, dash_table, dcc, html, no_update
 from dash.exceptions import PreventUpdate
 import requests
 
@@ -13,7 +13,6 @@ from layout.offcanvas import OffcanvasComponent
 from settings import (
     BENEFITS_PARTNERS_ENDPOINT,
     BENEFITS_REDEMPTIONS_ENDPOINT,
-    BENEFITS_REDEMPTIONS_PARTNER_FILTER,
     SITE_URL,
 )
 
@@ -240,6 +239,17 @@ def summarize_redemptions(rows):
     )
 
 
+def filter_redemptions_by_partner(rows, partner_name):
+    if not partner_name:
+        return []
+    expected = str(partner_name).strip().lower()
+    return [
+        row
+        for row in rows
+        if _redemption_partner_name(row).strip().lower() == expected
+    ]
+
+
 def _extract_rows(payload, source_key):
     if isinstance(payload, dict) and "results" in payload:
         return payload.get("results") or [], payload.get("count"), payload.get("next")
@@ -269,10 +279,7 @@ def fetch_partner_options(token):
         for raw_row in page_rows:
             row = _flatten_json(raw_row)
             label = _option_value(row, "name")
-            if "name" in BENEFITS_REDEMPTIONS_PARTNER_FILTER:
-                value = _option_value(row, "name", "id")
-            else:
-                value = _option_value(row, "id", "name")
+            value = _option_value(row, "name", "id")
             if not label or not value or value in seen:
                 continue
             options.append({"label": label, "value": value})
@@ -284,27 +291,25 @@ def fetch_partner_options(token):
     return sorted(options, key=lambda option: option["label"].lower())
 
 
-def fetch_redemptions_summary(endpoint, token, partner_value=None):
+def fetch_redemptions_page(endpoint, token, next_url=None):
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    url = SITE_URL.rstrip("/") + endpoint
-    params = {"limit": SUMMARY_PAGE_LIMIT}
-    if partner_value:
-        params[BENEFITS_REDEMPTIONS_PARTNER_FILTER] = partner_value
-    raw_rows = []
-    total = None
+    url = next_url or (SITE_URL.rstrip("/") + endpoint)
+    params = None if next_url else {"limit": SUMMARY_PAGE_LIMIT}
 
     response = requests.get(url, headers=headers, params=params, timeout=30)
     response.raise_for_status()
     page_rows, total, next_url = _extract_rows(response.json(), "redemptions")
-    raw_rows.extend(_flatten_json(row) for row in page_rows)
+    raw_rows = [_flatten_json(row) for row in page_rows]
 
-    return summarize_redemptions(raw_rows), total, bool(next_url), len(raw_rows)
+    return raw_rows, total, next_url
 
 
 def fetch_benefits_page(endpoint, token, source_key, partner_value=None):
     cfg = _source_config(source_key)
     if cfg.get("summary"):
-        return fetch_redemptions_summary(endpoint, token, partner_value=partner_value)
+        raw_page_rows, total, next_url = fetch_redemptions_page(endpoint, token)
+        raw_rows = filter_redemptions_by_partner(raw_page_rows, partner_value)
+        return summarize_redemptions(raw_rows), total, bool(next_url), len(raw_rows), raw_rows, next_url
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     url = SITE_URL.rstrip("/") + endpoint
@@ -317,7 +322,7 @@ def fetch_benefits_page(endpoint, token, source_key, partner_value=None):
     rows, total, next_url = _extract_rows(payload, source_key)
 
     rows = [_flatten_json(row) for row in rows]
-    return rows, total, bool(next_url), len(rows)
+    return rows, total, bool(next_url), len(rows), [], None
 
 
 fields_layout = [
@@ -350,6 +355,9 @@ fields_panel = OffcanvasComponent(
 layout = dbc.Container(
     [
         dcc.Store(id="benefits-rows-store", data=[]),
+        dcc.Store(id="redemptions-raw-rows-store", data=[]),
+        dcc.Store(id="redemptions-next-url-store"),
+        dcc.Store(id="redemptions-total-store"),
         dcc.Store(id="available-columns-store", data=[]),
         dcc.Store(id="applied-columns-store", data=[]),
         dcc.Store(id="active-source-store", data="partners"),
@@ -429,6 +437,18 @@ layout = dbc.Container(
             style={"display": "none"},
         ),
 
+        html.Div(
+            dbc.Button(
+                [html.I(className="bi bi-plus-circle me-1"), "Load More"],
+                id="load-more-redemptions-btn",
+                color="secondary",
+                disabled=True,
+            ),
+            id="load-more-redemptions-control",
+            className="mb-3",
+            style={"display": "none"},
+        ),
+
         fields_panel.offcanvas,
 
         dash_table.DataTable(
@@ -470,7 +490,10 @@ layout = dbc.Container(
     Input("benefits-source-tabs", "active_tab"),
     prevent_initial_call=False,
 )
-def load_redemptions_partner_options(_source_key):
+def load_redemptions_partner_options(source_key):
+    if source_key != "redemptions":
+        return []
+
     try:
         token = auth.get_token()
     except Exception:
@@ -493,7 +516,23 @@ def toggle_redemptions_partner_control(source_key):
 
 
 @dash.callback(
+    Output("load-more-redemptions-control", "style"),
+    Output("load-more-redemptions-btn", "disabled"),
+    Input("benefits-source-tabs", "active_tab"),
+    Input("redemptions-partner-select", "value"),
+    Input("redemptions-next-url-store", "data"),
+)
+def toggle_load_more_control(source_key, partner_value, next_url):
+    if source_key != "redemptions":
+        return {"display": "none"}, True
+    return {"display": "block"}, not bool(partner_value and next_url)
+
+
+@dash.callback(
     Output("benefits-rows-store", "data"),
+    Output("redemptions-raw-rows-store", "data"),
+    Output("redemptions-next-url-store", "data"),
+    Output("redemptions-total-store", "data"),
     Output("available-columns-store", "data"),
     Output("active-source-store", "data"),
     Output("columns-select", "options"),
@@ -516,6 +555,9 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
     if cfg.get("summary") and not partner_value:
         return (
             [],
+            [],
+            None,
+            None,
             columns,
             source_key,
             _column_options(columns),
@@ -529,19 +571,19 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
     try:
         token = auth.get_token()
     except Exception:
-        return [], [], source_key, [], [], [], "No access token yet.", "warning", True
+        return [], [], None, None, [], source_key, [], [], [], "No access token yet.", "warning", True
 
     try:
-        rows, total, has_more, raw_count = fetch_benefits_page(
+        rows, total, has_more, raw_count, raw_rows, next_url = fetch_benefits_page(
             cfg["endpoint"],
             token,
             source_key,
             partner_value=partner_value,
         )
     except requests.RequestException as exc:
-        return [], [], source_key, [], [], [], f"Could not load {cfg['label']}: {exc}", "danger", True
+        return [], [], None, None, [], source_key, [], [], [], f"Could not load {cfg['label']}: {exc}", "danger", True
     except Exception as exc:
-        return [], [], source_key, [], [], [], f"Unexpected error loading {cfg['label']}: {exc}", "danger", True
+        return [], [], None, None, [], source_key, [], [], [], f"Unexpected error loading {cfg['label']}: {exc}", "danger", True
 
     columns = _available_columns(cfg, rows)
     defaults = _default_columns(cfg, columns)
@@ -552,13 +594,13 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
     if cfg.get("summary"):
         if total is not None and has_more:
             message = (
-                f"Summarized first {raw_count} of {total} selected-partner "
-                f"{cfg['label'].lower()} into {len(rows)} row."
+                f"Found {raw_count} matching redemptions on this page. "
+                "Use Load More to scan the next page."
             )
         else:
             message = (
-                f"Summarized {raw_count} selected-partner "
-                f"{cfg['label'].lower()} into {len(rows)} row."
+                f"Found {raw_count} matching redemptions. "
+                "Full redemptions set has been scanned."
             )
     elif total is not None and has_more:
         message = f"Loaded first {len(rows)} of {total} {cfg['label'].lower()} rows."
@@ -567,6 +609,9 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
 
     return (
         rows,
+        raw_rows,
+        next_url,
+        total,
         columns,
         source_key,
         _column_options(columns),
@@ -576,6 +621,55 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
         "success",
         True,
     )
+
+
+@dash.callback(
+    Output("benefits-rows-store", "data", allow_duplicate=True),
+    Output("redemptions-raw-rows-store", "data", allow_duplicate=True),
+    Output("redemptions-next-url-store", "data", allow_duplicate=True),
+    Output("rows-toast", "children", allow_duplicate=True),
+    Output("rows-toast", "icon", allow_duplicate=True),
+    Output("rows-toast", "is_open", allow_duplicate=True),
+    Input("load-more-redemptions-btn", "n_clicks"),
+    State("redemptions-next-url-store", "data"),
+    State("redemptions-raw-rows-store", "data"),
+    State("redemptions-partner-select", "value"),
+    prevent_initial_call=True,
+)
+def load_more_redemptions(n_clicks, next_url, current_rows, partner_value):
+    if not n_clicks or not next_url or not partner_value:
+        raise PreventUpdate
+
+    try:
+        token = auth.get_token()
+    except Exception:
+        return no_update, no_update, no_update, "No access token yet.", "warning", True
+
+    try:
+        page_rows, _total, next_page_url = fetch_redemptions_page(
+            BENEFITS_REDEMPTIONS_ENDPOINT,
+            token,
+            next_url=next_url,
+        )
+    except requests.RequestException as exc:
+        return no_update, no_update, no_update, f"Could not load more redemptions: {exc}", "danger", True
+
+    matching_rows = filter_redemptions_by_partner(page_rows, partner_value)
+    combined_rows = (current_rows or []) + matching_rows
+    summary_rows = summarize_redemptions(combined_rows)
+
+    if next_page_url:
+        message = (
+            f"Added {len(matching_rows)} matching redemptions from the next page. "
+            "More pages are available."
+        )
+    else:
+        message = (
+            f"Added {len(matching_rows)} matching redemptions from the final page. "
+            "Full redemptions set has been scanned."
+        )
+
+    return summary_rows, combined_rows, next_page_url, message, "success", True
 
 
 @dash.callback(
