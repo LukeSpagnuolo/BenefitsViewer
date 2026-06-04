@@ -471,6 +471,13 @@ layout = dbc.Container(
         dcc.Store(id="available-columns-store", data=[]),
         dcc.Store(id="applied-columns-store", data=[]),
         dcc.Store(id="active-source-store", data="partners"),
+        dcc.Interval(
+            id="auto-load-interval",
+            interval=750,
+            max_intervals=1,
+            n_intervals=0,
+            disabled=True,
+        ),
         dcc.Download(id="download-csv"),
 
         html.Div(
@@ -547,14 +554,9 @@ layout = dbc.Container(
             style={"display": "none"},
         ),
 
-        html.Div(
-            dbc.Button(
-                [html.I(className="bi bi-plus-circle me-1"), "Load More"],
-                id="load-more-redemptions-btn",
-                color="secondary",
-                disabled=True,
-            ),
-            id="load-more-redemptions-control",
+        dbc.Alert(
+            id="rows-progress",
+            color="light",
             className="mb-3",
             style={"display": "none"},
         ),
@@ -626,16 +628,36 @@ def toggle_redemptions_partner_control(source_key):
 
 
 @dash.callback(
-    Output("load-more-redemptions-control", "style"),
-    Output("load-more-redemptions-btn", "disabled"),
+    Output("auto-load-interval", "disabled"),
+    Output("auto-load-interval", "n_intervals"),
     Input("benefits-source-tabs", "active_tab"),
     Input("redemptions-partner-select", "value"),
     Input("redemptions-next-url-store", "data"),
 )
-def toggle_load_more_control(source_key, partner_value, next_url):
+def toggle_auto_load(source_key, partner_value, next_url):
     if not next_url:
-        return {"display": "none"}, True
-    return {"display": "block"}, not bool(next_url)
+        return True, 0
+    return False, 0
+
+
+@dash.callback(
+    Output("rows-progress", "children"),
+    Output("rows-progress", "style"),
+    Input("active-source-store", "data"),
+    Input("benefits-rows-store", "data"),
+    Input("redemptions-raw-rows-store", "data"),
+    Input("redemptions-total-store", "data"),
+    Input("redemptions-next-url-store", "data"),
+)
+def render_rows_progress(source_key, table_rows, redemption_rows, total, next_url):
+    cfg = _source_config(source_key)
+    loaded = len(redemption_rows or []) if cfg.get("summary") else len(table_rows or [])
+    if not loaded and total is None:
+        return "", {"display": "none"}
+
+    count_text = f"{loaded}/{total}" if total is not None else str(loaded)
+    status = "Loading" if next_url else "Loaded"
+    return f"{status}: {count_text} {cfg['label'].lower()} rows", {"display": "block"}
 
 
 @dash.callback(
@@ -690,7 +712,7 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
             if total is not None and has_more:
                 message = (
                     f"Summarized first {len(raw_rows)} of {total} redemptions. "
-                    "Use Load More to scan the next page."
+                    "Loading the next page..."
                 )
             else:
                 message = (
@@ -700,7 +722,7 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
         elif total is not None and has_more:
             message = (
                 f"Found {raw_count} matching redemptions on this page. "
-                "Use Load More to scan the next page."
+                "Loading the next page..."
             )
         else:
             message = (
@@ -735,7 +757,7 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
     Output("rows-toast", "children", allow_duplicate=True),
     Output("rows-toast", "icon", allow_duplicate=True),
     Output("rows-toast", "is_open", allow_duplicate=True),
-    Input("load-more-redemptions-btn", "n_clicks"),
+    Input("auto-load-interval", "n_intervals"),
     State("redemptions-next-url-store", "data"),
     State("redemptions-raw-rows-store", "data"),
     State("benefits-rows-store", "data"),
@@ -744,8 +766,8 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
     State("redemptions-partner-select", "value"),
     prevent_initial_call=True,
 )
-def load_more_rows(n_clicks, next_url, current_redemption_rows, current_table_rows, total, source_key, partner_value):
-    if not n_clicks or not next_url:
+def load_more_rows(n_intervals, next_url, current_redemption_rows, current_table_rows, total, source_key, partner_value):
+    if not n_intervals or not next_url:
         raise PreventUpdate
 
     try:
