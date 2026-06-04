@@ -42,6 +42,31 @@ CAMPUS_NAMES_BY_VALUE = {
     "12": "Pacific Sport - Columbia Basin",
 }
 
+ROLE_NAMES_BY_VALUE = {
+    "1": "Athlete",
+    "2": "Coach",
+    "4": "Staff",
+    "5": "Performance Nation",
+}
+
+BENEFIT_TYPE_NAMES_BY_VALUE = {
+    "1": "GamePlan",
+    "2": "Partnerships",
+    "3": "Performance Nation",
+    "4": "Programs",
+    "5": "Supplemental",
+}
+
+BENEFIT_CATEGORY_NAMES_BY_VALUE = {
+    "1": "FoodStuff",
+    "2": "Grants",
+    "3": "GymWorks",
+    "4": "MoreStuff",
+    "5": "Performance Nation",
+    "6": "Education",
+    "7": "SportHealth",
+}
+
 PARTNER_COLUMNS = [
     "id",
     "created_at",
@@ -83,12 +108,32 @@ REDEMPTION_SUMMARY_COLUMNS = [
     "sport_counts",
 ]
 
+BENEFIT_DEFAULT_COLUMNS = [
+    "partner.name",
+    "partner.description",
+    "partner.city",
+    "partner.url",
+    "partner.institutions",
+    "partner.relevant_campuses",
+    "benefit_name",
+    "description",
+    "redemption_type",
+    "redemption_info",
+    "redemption_url",
+    "redemption_email",
+    "redemption_code",
+    "eligible_roles",
+    "benefit_types",
+    "benefit_category",
+]
+
 SOURCES = {
     "partners": {
         "label": "Benefits",
         "endpoint": BENEFITS_BENEFITS_ENDPOINT,
         "filename": "benefits",
         "payload_key": "benefits",
+        "default_columns": BENEFIT_DEFAULT_COLUMNS,
     },
     "redemptions": {
         "label": "Redemptions",
@@ -162,6 +207,12 @@ def _apply_column_mappings(row):
             mapped[column] = _mapped_name(value, CAMPUS_NAMES_BY_VALUE)
         elif "institution" in column_key:
             mapped[column] = _mapped_name(value, INSTITUTION_NAMES_BY_VALUE)
+        elif "role" in column_key:
+            mapped[column] = _mapped_name(value, ROLE_NAMES_BY_VALUE)
+        elif "benefit_type" in column_key or "benefit.type" in column_key:
+            mapped[column] = _mapped_name(value, BENEFIT_TYPE_NAMES_BY_VALUE)
+        elif "benefit_category" in column_key or "benefit.category" in column_key:
+            mapped[column] = _mapped_name(value, BENEFIT_CATEGORY_NAMES_BY_VALUE)
         else:
             mapped[column] = value
     return mapped
@@ -352,6 +403,20 @@ def fetch_redemptions_page(endpoint, token, next_url=None):
     return raw_rows, total, next_url
 
 
+def fetch_source_page(endpoint, token, source_key, next_url=None):
+    cfg = _source_config(source_key)
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    url = next_url or (SITE_URL.rstrip("/") + endpoint)
+    params = None if next_url else {"limit": PAGE_LIMIT}
+
+    response = requests.get(url, headers=headers, params=params, timeout=60)
+    response.raise_for_status()
+    rows, total, next_url = _extract_rows(response.json(), cfg.get("payload_key", source_key))
+    rows = [_apply_column_mappings(_flatten_json(row)) for row in rows]
+
+    return rows, total, next_url
+
+
 def fetch_benefits_page(endpoint, token, source_key, partner_value=None):
     cfg = _source_config(source_key)
     if cfg.get("summary"):
@@ -366,18 +431,8 @@ def fetch_benefits_page(endpoint, token, source_key, partner_value=None):
             next_url,
         )
 
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-    url = SITE_URL.rstrip("/") + endpoint
-    params = {"limit": PAGE_LIMIT}
-
-    response = requests.get(url, headers=headers, params=params, timeout=60)
-    response.raise_for_status()
-    payload = response.json()
-
-    rows, total, next_url = _extract_rows(payload, cfg.get("payload_key", source_key))
-
-    rows = [_apply_column_mappings(_flatten_json(row)) for row in rows]
-    return rows, total, bool(next_url), len(rows), [], None
+    rows, total, next_url = fetch_source_page(endpoint, token, source_key)
+    return rows, total, bool(next_url), len(rows), [], next_url
 
 
 fields_layout = [
@@ -578,7 +633,7 @@ def toggle_redemptions_partner_control(source_key):
     Input("redemptions-next-url-store", "data"),
 )
 def toggle_load_more_control(source_key, partner_value, next_url):
-    if source_key != "redemptions":
+    if not next_url:
         return {"display": "none"}, True
     return {"display": "block"}, not bool(next_url)
 
@@ -683,10 +738,13 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
     Input("load-more-redemptions-btn", "n_clicks"),
     State("redemptions-next-url-store", "data"),
     State("redemptions-raw-rows-store", "data"),
+    State("benefits-rows-store", "data"),
+    State("redemptions-total-store", "data"),
+    State("active-source-store", "data"),
     State("redemptions-partner-select", "value"),
     prevent_initial_call=True,
 )
-def load_more_redemptions(n_clicks, next_url, current_rows, partner_value):
+def load_more_rows(n_clicks, next_url, current_redemption_rows, current_table_rows, total, source_key, partner_value):
     if not n_clicks or not next_url:
         raise PreventUpdate
 
@@ -695,32 +753,56 @@ def load_more_redemptions(n_clicks, next_url, current_rows, partner_value):
     except Exception:
         return no_update, no_update, no_update, "No access token yet.", "warning", True
 
+    cfg = _source_config(source_key)
+    if cfg.get("summary"):
+        try:
+            page_rows, _total, next_page_url = fetch_redemptions_page(
+                cfg["endpoint"],
+                token,
+                next_url=next_url,
+            )
+        except requests.RequestException as exc:
+            return no_update, no_update, no_update, f"Could not load more redemptions: {exc}", "danger", True
+
+        combined_rows = (current_redemption_rows or []) + page_rows
+        matching_rows = filter_redemptions_by_partner(combined_rows, partner_value)
+        summary_rows = summarize_redemptions(matching_rows)
+        scope = "matching" if partner_value else "total"
+
+        if next_page_url:
+            message = (
+                f"Scanned {len(combined_rows)} redemptions and summarized {len(matching_rows)} {scope} rows. "
+                "More pages are available."
+            )
+        else:
+            message = (
+                f"Scanned {len(combined_rows)} redemptions and summarized {len(matching_rows)} {scope} rows. "
+                "Full redemptions set has been scanned."
+            )
+
+        return summary_rows, combined_rows, next_page_url, message, "success", True
+
     try:
-        page_rows, _total, next_page_url = fetch_redemptions_page(
-            BENEFITS_REDEMPTIONS_ENDPOINT,
+        page_rows, _page_total, next_page_url = fetch_source_page(
+            cfg["endpoint"],
             token,
+            source_key,
             next_url=next_url,
         )
     except requests.RequestException as exc:
-        return no_update, no_update, no_update, f"Could not load more redemptions: {exc}", "danger", True
+        return no_update, no_update, no_update, f"Could not load more {cfg['label'].lower()}: {exc}", "danger", True
 
-    combined_rows = (current_rows or []) + page_rows
-    matching_rows = filter_redemptions_by_partner(combined_rows, partner_value)
-    summary_rows = summarize_redemptions(matching_rows)
-    scope = "matching" if partner_value else "total"
-
-    if next_page_url:
-        message = (
-            f"Scanned {len(combined_rows)} redemptions and summarized {len(matching_rows)} {scope} rows. "
-            "More pages are available."
-        )
+    combined_rows = (current_table_rows or []) + page_rows
+    if total is not None and next_page_url:
+        message = f"Loaded {len(combined_rows)} of {total} {cfg['label'].lower()} rows. More pages are available."
+    elif total is not None:
+        message = f"Loaded all {len(combined_rows)} of {total} {cfg['label'].lower()} rows."
+    elif next_page_url:
+        message = f"Loaded {len(combined_rows)} {cfg['label'].lower()} rows. More pages are available."
     else:
-        message = (
-            f"Scanned {len(combined_rows)} redemptions and summarized {len(matching_rows)} {scope} rows. "
-            "Full redemptions set has been scanned."
-        )
+        message = f"Loaded all {len(combined_rows)} {cfg['label'].lower()} rows."
 
-    return summary_rows, combined_rows, next_page_url, message, "success", True
+    return combined_rows, no_update, next_page_url, message, "success", True
 
 
 @dash.callback(
