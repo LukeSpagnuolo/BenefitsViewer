@@ -30,18 +30,15 @@ INSTITUTION_NAMES_BY_VALUE = {
 }
 
 CAMPUS_NAMES_BY_VALUE = {
-    "1": "CSI Pacific -Victoria",
+    "1": "CSI Pacific - Victoria",
     "2": "CSI Pacific - Vancouver",
     "3": "CSI Pacific - Whistler",
-    "4": "Engage Sport North",
-    "5": "Pacific Sport - Columbia Basin",
-    "6": "Pacific Sport - Fraser Valley",
+    "4": "Pacific Sport - Fraser Valley",
+    "5": "Pacific Sport - Okanagan",
+    "6": "Pacific Sport - Vancouver Island",
     "7": "Pacific Sport - Interior",
-    "8": "Pacific Sport - Okanagan",
-    "9": "Pacific Sport - Vancouver Island",
-    "13": "Scarborough",
-    "14": "Milton",
-    "15": "Niagara",
+    "8": "Engage Sport North",
+    "12": "Pacific Sport - Columbia Basin",
 }
 
 PARTNER_COLUMNS = [
