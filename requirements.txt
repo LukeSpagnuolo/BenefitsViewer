@@ -1,4 +1,8 @@
 dash>=2.5
 dash-auth-external==1.2.1
+dash-bootstrap-components
+dash-mantine-components
 pandas
+python-dotenv
 requests
+urllib3<2
