@@ -192,7 +192,14 @@ def fetch_paginated(url, headers, log=None):
 # App Setup
 # -------------------------------------------------------------------------
 
-auth = DashAuthExternal(AUTH_URL, TOKEN_URL, APP_URL, CLIENT_ID, CLIENT_SECRET)
+auth = DashAuthExternal(
+    external_auth_url=AUTH_URL,
+    external_token_url=TOKEN_URL,
+    client_id=CLIENT_ID,
+    client_secret=CLIENT_SECRET,
+    app_url=APP_URL,
+    with_pkce=False,
+)
 server = auth.server
 app = Dash(__name__, server=server)
 

@@ -60,3 +60,9 @@ rsconnect deploy dash \
 After the first publish, set `APP_URL` to the public Posit Connect content URL
 and make sure the OAuth client redirect/callback URL uses that same deployed
 URL.
+
+The OAuth redirect/callback URL registered with the provider should be:
+
+```text
+<APP_URL>/redirect
+```
