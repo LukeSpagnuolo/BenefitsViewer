@@ -23,15 +23,23 @@ from requests.exceptions import ConnectTimeout, ConnectionError, ReadTimeout
 def env(*names, default=None):
     for name in names:
         value = os.environ.get(name)
-        if value:
+        if value and value.strip():
+            return value.strip()
+    return default.strip() if isinstance(default, str) else default
+
+
+def has_env(*names):
+    for name in names:
+        value = os.environ.get(name)
+        if value and value.strip():
             return value
-    return default
+    return None
 
 
 def missing_config(required_options):
     missing = []
     for options in required_options:
-        if not any(os.environ.get(name) for name in options):
+        if not has_env(*options):
             missing.append(" or ".join(options))
     return missing
 
