@@ -69,7 +69,7 @@ app = Dash(
 navbar = Navbar(
     title="Benefits Viewer",
     buttons=[
-        {"label": "Registration Data", "url": "/home"},
+        {"label": "Benefits Data", "url": "/home"},
     ],
 )
 navbar.register_callbacks(app)

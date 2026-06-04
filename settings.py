@@ -31,8 +31,5 @@ TOKEN_URL = env("BENEFITS_VIEWER_TOKEN_URL", default=f"{SITE_URL}/o/token/")
 CLIENT_ID = env("BENEFITS_VIEWER_CLIENT_ID", "CLIENT_ID")
 CLIENT_SECRET = env("BENEFITS_VIEWER_CLIENT_SECRET", "CLIENT_SECRET")
 
-SPORT_ORG_ENDPOINT = f"/api/registration/organization/"
-PROFILE_ENDPOINT = f"/api/registration/profile/"
-
-REPORT_COLUMNS_ENDPOINT = "/api/registration/report-columns/"
-REPORT_ROWS_ENDPOINT = "/api/registration/report-rows/"
+BENEFITS_PARTNERS_ENDPOINT = "/api/benefits/partners/"
+BENEFITS_REDEMPTIONS_ENDPOINT = "/api/benefits/redemptions/"

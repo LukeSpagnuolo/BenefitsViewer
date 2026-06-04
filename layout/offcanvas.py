@@ -16,7 +16,7 @@ class OffcanvasIds:
 
 class OffcanvasComponent:
     """
-    Generic Offcanvas + toggle button + callback registration.
+    Generic Offcanvas + toggle button + callback wiring.
 
     Usage:
         off = OffcanvasComponent(app, id_prefix="filters", title="Filters", children=my_filters_layout)

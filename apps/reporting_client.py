@@ -12,17 +12,16 @@ class ReportingClientError(Exception):
 @dataclass
 class ReportingAPIConfig:
     """
-    Minimal configuration for the Registration Reporting API.
+    Minimal configuration for benefits API endpoints.
 
-    Assumes DRF router endpoints like:
-      - /api/registration/report-columns/
-      - /api/registration/report-columns/<key>/
-      - /api/registration/report-rows/
+    The current Benefits Viewer uses:
+      - /api/benefits/partners/
+      - /api/benefits/redemptions/
     """
     base_url: str
-    columns_list_path: str = "/api/registration/report-columns/"
-    columns_detail_pattern: str = "/api/registration/report-columns/{key}/"
-    rows_path: str = "/api/registration/report-rows/"
+    columns_list_path: str = "/api/benefits/partners/"
+    columns_detail_pattern: str = "/api/benefits/partners/{key}/"
+    rows_path: str = "/api/benefits/partners/"
     timeout_s: int = 20
 
     @property
@@ -39,7 +38,7 @@ class ReportingAPIConfig:
 
 class ReportingClient:
     """
-    Client for interacting with Registration Reporting endpoints.
+    Client for interacting with benefits endpoints.
     Patterned after WarehouseClient:
       - token_getter supplies OAuth token (no "Bearer " prefix required)
       - handles DRF pagination via `next` links

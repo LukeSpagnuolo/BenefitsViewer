@@ -37,7 +37,7 @@ nav_links = [
     # {'label':"Entry",'url':"/entry"},
     # {'label':"Report",'url':"/report"}
 ]
-navbar = Navbar(nav_links, id="navbar", title="Regional Partner Registration Dashboard", expand="lg")
+navbar = Navbar(nav_links, id="navbar", title="Benefits Viewer", expand="lg")
 navbar.register_callbacks(app)
 
 footer = Footer()
