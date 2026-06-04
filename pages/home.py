@@ -17,6 +17,7 @@ dash.register_page(__name__, path="/home")
 
 
 PAGE_LIMIT = 100
+SUMMARY_PAGE_LIMIT = 1000
 DEFAULT_PAGE_SIZE = 25
 
 PARTNER_COLUMNS = [
@@ -53,6 +54,13 @@ PARTNER_DEFAULT_COLUMNS = [
     "relevant_campuses",
 ]
 
+REDEMPTION_SUMMARY_COLUMNS = [
+    "partner_name",
+    "redemption_count",
+    "institution_counts",
+    "sport_counts",
+]
+
 SOURCES = {
     "partners": {
         "label": "Partners",
@@ -64,7 +72,10 @@ SOURCES = {
     "redemptions": {
         "label": "Redemptions",
         "endpoint": BENEFITS_REDEMPTIONS_ENDPOINT,
-        "filename": "benefits_redemptions",
+        "filename": "benefits_redemptions_summary",
+        "columns": REDEMPTION_SUMMARY_COLUMNS,
+        "default_columns": REDEMPTION_SUMMARY_COLUMNS,
+        "summary": True,
     },
 }
 
@@ -135,7 +146,125 @@ def _subset_rows(rows, columns):
     return [{column: row.get(column, "") for column in columns} for row in rows]
 
 
+def _first_value(row, candidates, default=""):
+    for key in candidates:
+        value = row.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _format_counts(counts):
+    if not counts:
+        return ""
+    return ", ".join(
+        f"{name}: {count}"
+        for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))
+    )
+
+
+def _redemption_partner_name(row):
+    return str(
+        _first_value(
+            row,
+            [
+                "benefit.partner.name",
+                "benefit.partner_name",
+                "partner.name",
+                "partner_name",
+            ],
+            default="Unknown partner",
+        )
+    )
+
+
+def _redemption_institution(row):
+    return str(_first_value(row, ["institution", "institution.name"], default="Unknown institution"))
+
+
+def _redemption_sport(row):
+    return str(_first_value(row, ["profile.sport.name", "profile.sport", "sport.name", "sport"], default="Unknown sport"))
+
+
+def summarize_redemptions(rows):
+    groups = {}
+
+    for row in rows:
+        key = _redemption_partner_name(row)
+
+        if key not in groups:
+            groups[key] = {
+                "partner_name": key,
+                "redemption_count": 0,
+                "_institution_counts": {},
+                "_sport_counts": {},
+            }
+
+        summary = groups[key]
+        summary["redemption_count"] += 1
+
+        institution = _redemption_institution(row)
+        summary["_institution_counts"][institution] = summary["_institution_counts"].get(institution, 0) + 1
+
+        sport = _redemption_sport(row)
+        summary["_sport_counts"][sport] = summary["_sport_counts"].get(sport, 0) + 1
+
+    rows = []
+    for summary in groups.values():
+        rows.append(
+            {
+                "partner_name": summary["partner_name"],
+                "redemption_count": summary["redemption_count"],
+                "institution_counts": _format_counts(summary["_institution_counts"]),
+                "sport_counts": _format_counts(summary["_sport_counts"]),
+            }
+        )
+
+    return sorted(
+        rows,
+        key=lambda row: (-row["redemption_count"], row["partner_name"].lower()),
+    )
+
+
+def _extract_rows(payload, source_key):
+    if isinstance(payload, dict) and "results" in payload:
+        return payload.get("results") or [], payload.get("count"), payload.get("next")
+    if isinstance(payload, dict) and isinstance(payload.get(source_key), list):
+        return payload.get(source_key) or [], None, None
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        return payload.get("data") or [], None, None
+    if isinstance(payload, list):
+        return payload, None, None
+    if isinstance(payload, dict):
+        return [payload], None, None
+    return [], None, None
+
+
+def fetch_redemptions_summary(endpoint, token):
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    url = SITE_URL.rstrip("/") + endpoint
+    params = {"limit": SUMMARY_PAGE_LIMIT}
+    raw_rows = []
+    total = None
+
+    while url:
+        response = requests.get(url, headers=headers, params=params, timeout=60)
+        response.raise_for_status()
+        page_rows, page_total, next_url = _extract_rows(response.json(), "redemptions")
+        total = page_total if page_total is not None else total
+        raw_rows.extend(_flatten_json(row) for row in page_rows)
+
+        url = next_url
+        params = None
+
+    return summarize_redemptions(raw_rows), total, False, len(raw_rows)
+
+
 def fetch_benefits_page(endpoint, token, source_key):
+    cfg = _source_config(source_key)
+    if cfg.get("summary"):
+        return fetch_redemptions_summary(endpoint, token)
+
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     url = SITE_URL.rstrip("/") + endpoint
     params = {"limit": PAGE_LIMIT}
@@ -144,25 +273,10 @@ def fetch_benefits_page(endpoint, token, source_key):
     response.raise_for_status()
     payload = response.json()
 
-    total = None
-    has_more = False
+    rows, total, next_url = _extract_rows(payload, source_key)
 
-    if isinstance(payload, dict) and "results" in payload:
-        rows = payload.get("results") or []
-        total = payload.get("count")
-        has_more = bool(payload.get("next"))
-    elif isinstance(payload, dict) and isinstance(payload.get(source_key), list):
-        rows = payload.get(source_key) or []
-    elif isinstance(payload, dict) and isinstance(payload.get("data"), list):
-        rows = payload.get("data") or []
-    elif isinstance(payload, list):
-        rows = payload
-    elif isinstance(payload, dict):
-        rows = [payload]
-    else:
-        rows = []
-
-    return [_flatten_json(row) for row in rows], total, has_more
+    rows = [_flatten_json(row) for row in rows]
+    return rows, total, bool(next_url), len(rows)
 
 
 fields_layout = [
@@ -318,7 +432,7 @@ def load_benefits_rows(source_key, _refresh_clicks, selected_columns):
         return [], [], source_key, [], [], [], "No access token yet.", "warning", True
 
     try:
-        rows, total, has_more = fetch_benefits_page(cfg["endpoint"], token, source_key)
+        rows, total, has_more, raw_count = fetch_benefits_page(cfg["endpoint"], token, source_key)
     except requests.RequestException as exc:
         return [], [], source_key, [], [], [], f"Could not load {cfg['label']}: {exc}", "danger", True
     except Exception as exc:
@@ -330,7 +444,15 @@ def load_benefits_rows(source_key, _refresh_clicks, selected_columns):
     if not selected:
         selected = defaults or columns
 
-    if total is not None and has_more:
+    if cfg.get("summary"):
+        if total is not None and has_more:
+            message = (
+                f"Summarized first {raw_count} of {total} "
+                f"{cfg['label'].lower()} into {len(rows)} groups."
+            )
+        else:
+            message = f"Summarized {raw_count} {cfg['label'].lower()} into {len(rows)} groups."
+    elif total is not None and has_more:
         message = f"Loaded first {len(rows)} of {total} {cfg['label'].lower()} rows."
     else:
         message = f"Loaded {len(rows)} {cfg['label'].lower()} rows."
