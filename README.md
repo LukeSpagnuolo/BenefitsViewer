@@ -34,6 +34,11 @@ BENEFITS_VIEWER_CLIENT_SECRET
 BENEFITS_VIEWER_APP_URL
 ```
 
+If the first publish opens with a missing configuration message, add those
+environment variables in the Posit Connect content settings and republish or
+restart the app. `BENEFITS_VIEWER_APP_URL` should be the public URL for this
+deployed Posit content.
+
 Optional environment variables:
 
 ```text

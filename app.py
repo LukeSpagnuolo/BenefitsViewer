@@ -20,19 +20,23 @@ from dash_auth_external import DashAuthExternal
 from requests.exceptions import ConnectTimeout, ConnectionError, ReadTimeout
 
 
-def env(name, default=None, required=False):
-    value = os.environ.get(name, default)
-    if required and not value:
-        raise RuntimeError(f"Missing required environment variable: {name}")
-    return value
+def env(name, default=None):
+    return os.environ.get(name, default)
 
 
 # -------------------------------------------------------------------------
 # Runtime Config
 # -------------------------------------------------------------------------
 
-CLIENT_ID = env("BENEFITS_VIEWER_CLIENT_ID", required=True)
-CLIENT_SECRET = env("BENEFITS_VIEWER_CLIENT_SECRET", required=True)
+REQUIRED_CONFIG = (
+    "BENEFITS_VIEWER_CLIENT_ID",
+    "BENEFITS_VIEWER_CLIENT_SECRET",
+    "BENEFITS_VIEWER_APP_URL",
+)
+MISSING_CONFIG = [name for name in REQUIRED_CONFIG if not os.environ.get(name)]
+
+CLIENT_ID = env("BENEFITS_VIEWER_CLIENT_ID", "")
+CLIENT_SECRET = env("BENEFITS_VIEWER_CLIENT_SECRET", "")
 
 # Django site that hosts OAuth + API.
 SITE = env("BENEFITS_VIEWER_SITE", "https://apps.csipacific.ca").rstrip("/")
@@ -182,6 +186,21 @@ cached_df = pd.DataFrame()
 app.layout = html.Div(
     [
         html.H1("Benefits Viewer"),
+        html.Div(
+            [
+                html.Strong("Missing Posit environment variables: "),
+                ", ".join(MISSING_CONFIG),
+            ],
+            id="config-warning",
+            style={
+                "display": "block" if MISSING_CONFIG else "none",
+                "marginBottom": "0.75rem",
+                "padding": "0.75rem",
+                "border": "1px solid #b00020",
+                "color": "#b00020",
+                "fontFamily": "Arial",
+            },
+        ),
         html.Button("Fetch Data", id="btn-fetch"),
         html.Div(id="status-msg", style={"marginTop": "0.5rem"}),
         dash_table.DataTable(
@@ -210,6 +229,12 @@ def fetch_and_display(n_clicks):
 
     if not n_clicks:
         raise PreventUpdate
+
+    if MISSING_CONFIG:
+        return [], [], (
+            "App is missing required environment variables: "
+            f"{', '.join(MISSING_CONFIG)}."
+        )
 
     token = auth.get_token()
     if not token:
