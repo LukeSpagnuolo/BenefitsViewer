@@ -24,6 +24,26 @@ PAGE_LIMIT = 100
 SUMMARY_PAGE_LIMIT = 2000
 DEFAULT_PAGE_SIZE = 25
 
+INSTITUTION_NAMES_BY_VALUE = {
+    "1": "CSI Pacific",
+    "2": "CSI Ontario",
+}
+
+CAMPUS_NAMES_BY_VALUE = {
+    "1": "CSI Pacific -Victoria",
+    "2": "CSI Pacific - Vancouver",
+    "3": "CSI Pacific - Whistler",
+    "4": "Engage Sport North",
+    "5": "Pacific Sport - Columbia Basin",
+    "6": "Pacific Sport - Fraser Valley",
+    "7": "Pacific Sport - Interior",
+    "8": "Pacific Sport - Okanagan",
+    "9": "Pacific Sport - Vancouver Island",
+    "13": "Scarborough",
+    "14": "Milton",
+    "15": "Niagara",
+}
+
 PARTNER_COLUMNS = [
     "id",
     "created_at",
@@ -117,6 +137,37 @@ def _flatten_json(value, prefix=""):
         return {prefix: _safe_cell(value)}
 
     return {prefix: _safe_cell(value)}
+
+
+def _mapped_name(value, mapping):
+    if value in (None, ""):
+        return value
+
+    key = str(value).strip()
+    if key in mapping:
+        return mapping[key]
+
+    if not isinstance(value, str) or "," not in value:
+        return value
+
+    parts = [part.strip() for part in value.split(",")]
+    if not parts or any(part not in mapping for part in parts):
+        return value
+
+    return ", ".join(mapping[part] for part in parts)
+
+
+def _apply_column_mappings(row):
+    mapped = {}
+    for column, value in row.items():
+        column_key = column.lower()
+        if "campus" in column_key:
+            mapped[column] = _mapped_name(value, CAMPUS_NAMES_BY_VALUE)
+        elif "institution" in column_key:
+            mapped[column] = _mapped_name(value, INSTITUTION_NAMES_BY_VALUE)
+        else:
+            mapped[column] = value
+    return mapped
 
 
 def _columns_from_rows(rows):
@@ -299,7 +350,7 @@ def fetch_redemptions_page(endpoint, token, next_url=None):
     response = requests.get(url, headers=headers, params=params, timeout=30)
     response.raise_for_status()
     page_rows, total, next_url = _extract_rows(response.json(), "redemptions")
-    raw_rows = [_flatten_json(row) for row in page_rows]
+    raw_rows = [_apply_column_mappings(_flatten_json(row)) for row in page_rows]
 
     return raw_rows, total, next_url
 
@@ -328,7 +379,7 @@ def fetch_benefits_page(endpoint, token, source_key, partner_value=None):
 
     rows, total, next_url = _extract_rows(payload, source_key)
 
-    rows = [_flatten_json(row) for row in rows]
+    rows = [_apply_column_mappings(_flatten_json(row)) for row in rows]
     return rows, total, bool(next_url), len(rows), [], None
 
 
