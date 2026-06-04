@@ -66,3 +66,5 @@ The OAuth redirect/callback URL registered with the provider should be:
 ```text
 <APP_URL>/redirect
 ```
+
+The OAuth provider must allow the authorization-code flow with PKCE.

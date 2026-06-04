@@ -201,7 +201,7 @@ auth = DashAuthExternal(
     client_id=CLIENT_ID,
     client_secret=CLIENT_SECRET,
     app_url=APP_URL,
-    with_pkce=False,
+    with_pkce=True,
 )
 server = auth.server
 app = Dash(__name__, server=server)
