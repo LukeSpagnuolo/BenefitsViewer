@@ -1,0 +1,4 @@
+dash>=2.5
+dash-auth-external==1.2.1
+pandas
+requests
