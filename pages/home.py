@@ -241,7 +241,7 @@ def summarize_redemptions(rows):
 
 def filter_redemptions_by_partner(rows, partner_name):
     if not partner_name:
-        return []
+        return rows or []
     expected = str(partner_name).strip().lower()
     return [
         row
@@ -532,7 +532,7 @@ def toggle_redemptions_partner_control(source_key):
 def toggle_load_more_control(source_key, partner_value, next_url):
     if source_key != "redemptions":
         return {"display": "none"}, True
-    return {"display": "block"}, not bool(partner_value and next_url)
+    return {"display": "block"}, not bool(next_url)
 
 
 @dash.callback(
@@ -586,13 +586,13 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
         if not partner_value:
             if total is not None and has_more:
                 message = (
-                    f"Loaded first {len(raw_rows)} of {total} redemptions. "
-                    "Select a partner to summarize this scanned set."
+                    f"Summarized first {len(raw_rows)} of {total} redemptions. "
+                    "Use Load More to scan the next page."
                 )
             else:
                 message = (
-                    f"Loaded {len(raw_rows)} redemptions. "
-                    "Select a partner to summarize this scanned set."
+                    f"Summarized {len(raw_rows)} redemptions. "
+                    "Full redemptions set has been scanned."
                 )
         elif total is not None and has_more:
             message = (
@@ -639,7 +639,7 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
     prevent_initial_call=True,
 )
 def load_more_redemptions(n_clicks, next_url, current_rows, partner_value):
-    if not n_clicks or not next_url or not partner_value:
+    if not n_clicks or not next_url:
         raise PreventUpdate
 
     try:
@@ -659,15 +659,16 @@ def load_more_redemptions(n_clicks, next_url, current_rows, partner_value):
     combined_rows = (current_rows or []) + page_rows
     matching_rows = filter_redemptions_by_partner(combined_rows, partner_value)
     summary_rows = summarize_redemptions(matching_rows)
+    scope = "matching" if partner_value else "total"
 
     if next_page_url:
         message = (
-            f"Scanned {len(combined_rows)} redemptions and found {len(matching_rows)} matching rows. "
+            f"Scanned {len(combined_rows)} redemptions and summarized {len(matching_rows)} {scope} rows. "
             "More pages are available."
         )
     else:
         message = (
-            f"Scanned {len(combined_rows)} redemptions and found {len(matching_rows)} matching rows. "
+            f"Scanned {len(combined_rows)} redemptions and summarized {len(matching_rows)} {scope} rows. "
             "Full redemptions set has been scanned."
         )
 
