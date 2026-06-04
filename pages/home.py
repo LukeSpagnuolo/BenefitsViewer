@@ -21,7 +21,7 @@ dash.register_page(__name__, path="/home")
 
 
 PAGE_LIMIT = 100
-SUMMARY_PAGE_LIMIT = 1000
+SUMMARY_PAGE_LIMIT = 2000
 DEFAULT_PAGE_SIZE = 25
 
 PARTNER_COLUMNS = [
@@ -304,38 +304,18 @@ def fetch_redemptions_page(endpoint, token, next_url=None):
     return raw_rows, total, next_url
 
 
-def fetch_all_redemptions(endpoint, token):
-    rows = []
-    total = None
-    next_url = None
-
-    while True:
-        page_rows, page_total, next_url = fetch_redemptions_page(
-            endpoint,
-            token,
-            next_url=next_url,
-        )
-        rows.extend(page_rows)
-        if page_total is not None:
-            total = page_total
-        if not next_url:
-            break
-
-    return rows, total
-
-
 def fetch_benefits_page(endpoint, token, source_key, partner_value=None):
     cfg = _source_config(source_key)
     if cfg.get("summary"):
-        raw_rows, total = fetch_all_redemptions(endpoint, token)
-        matching_rows = filter_redemptions_by_partner(raw_rows, partner_value)
+        raw_page_rows, total, next_url = fetch_redemptions_page(endpoint, token)
+        matching_rows = filter_redemptions_by_partner(raw_page_rows, partner_value)
         return (
             summarize_redemptions(matching_rows),
             total,
-            False,
+            bool(next_url),
             len(matching_rows),
-            raw_rows,
-            None,
+            raw_page_rows,
+            next_url,
         )
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
@@ -550,7 +530,7 @@ def toggle_redemptions_partner_control(source_key):
     Input("redemptions-next-url-store", "data"),
 )
 def toggle_load_more_control(source_key, partner_value, next_url):
-    if source_key != "redemptions" or not next_url:
+    if source_key != "redemptions":
         return {"display": "none"}, True
     return {"display": "block"}, not bool(next_url)
 
@@ -604,14 +584,26 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
 
     if cfg.get("summary"):
         if not partner_value:
-            if total is not None:
-                message = f"Summarized all {len(raw_rows)} of {total} redemptions."
+            if total is not None and has_more:
+                message = (
+                    f"Summarized first {len(raw_rows)} of {total} redemptions. "
+                    "Use Load More to scan the next page."
+                )
             else:
-                message = f"Summarized all {len(raw_rows)} redemptions."
-        elif total is not None:
-            message = f"Found {raw_count} matching redemptions after scanning all {total} redemptions."
+                message = (
+                    f"Summarized {len(raw_rows)} redemptions. "
+                    "Full redemptions set has been scanned."
+                )
+        elif total is not None and has_more:
+            message = (
+                f"Found {raw_count} matching redemptions on this page. "
+                "Use Load More to scan the next page."
+            )
         else:
-            message = f"Found {raw_count} matching redemptions after scanning all redemptions."
+            message = (
+                f"Found {raw_count} matching redemptions. "
+                "Full redemptions set has been scanned."
+            )
     elif total is not None and has_more:
         message = f"Loaded first {len(rows)} of {total} {cfg['label'].lower()} rows."
     else:
