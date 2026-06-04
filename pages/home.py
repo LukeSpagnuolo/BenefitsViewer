@@ -308,8 +308,15 @@ def fetch_benefits_page(endpoint, token, source_key, partner_value=None):
     cfg = _source_config(source_key)
     if cfg.get("summary"):
         raw_page_rows, total, next_url = fetch_redemptions_page(endpoint, token)
-        raw_rows = filter_redemptions_by_partner(raw_page_rows, partner_value)
-        return summarize_redemptions(raw_rows), total, bool(next_url), len(raw_rows), raw_rows, next_url
+        matching_rows = filter_redemptions_by_partner(raw_page_rows, partner_value)
+        return (
+            summarize_redemptions(matching_rows),
+            total,
+            bool(next_url),
+            len(matching_rows),
+            raw_page_rows,
+            next_url,
+        )
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     url = SITE_URL.rstrip("/") + endpoint
@@ -552,22 +559,6 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
     columns = _available_columns(cfg, [])
     defaults = _default_columns(cfg, columns)
 
-    if cfg.get("summary") and not partner_value:
-        return (
-            [],
-            [],
-            None,
-            None,
-            columns,
-            source_key,
-            _column_options(columns),
-            defaults,
-            defaults,
-            "Select a partner to load redemptions.",
-            "info",
-            True,
-        )
-
     try:
         token = auth.get_token()
     except Exception:
@@ -592,7 +583,18 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
         selected = defaults or columns
 
     if cfg.get("summary"):
-        if total is not None and has_more:
+        if not partner_value:
+            if total is not None and has_more:
+                message = (
+                    f"Loaded first {len(raw_rows)} of {total} redemptions. "
+                    "Select a partner to summarize this scanned set."
+                )
+            else:
+                message = (
+                    f"Loaded {len(raw_rows)} redemptions. "
+                    "Select a partner to summarize this scanned set."
+                )
+        elif total is not None and has_more:
             message = (
                 f"Found {raw_count} matching redemptions on this page. "
                 "Use Load More to scan the next page."
@@ -654,18 +656,18 @@ def load_more_redemptions(n_clicks, next_url, current_rows, partner_value):
     except requests.RequestException as exc:
         return no_update, no_update, no_update, f"Could not load more redemptions: {exc}", "danger", True
 
-    matching_rows = filter_redemptions_by_partner(page_rows, partner_value)
-    combined_rows = (current_rows or []) + matching_rows
-    summary_rows = summarize_redemptions(combined_rows)
+    combined_rows = (current_rows or []) + page_rows
+    matching_rows = filter_redemptions_by_partner(combined_rows, partner_value)
+    summary_rows = summarize_redemptions(matching_rows)
 
     if next_page_url:
         message = (
-            f"Added {len(matching_rows)} matching redemptions from the next page. "
+            f"Scanned {len(combined_rows)} redemptions and found {len(matching_rows)} matching rows. "
             "More pages are available."
         )
     else:
         message = (
-            f"Added {len(matching_rows)} matching redemptions from the final page. "
+            f"Scanned {len(combined_rows)} redemptions and found {len(matching_rows)} matching rows. "
             "Full redemptions set has been scanned."
         )
 
