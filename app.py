@@ -17,7 +17,7 @@ import pandas as pd
 import requests
 from dash import Dash, Input, Output, dash_table, html
 from dash.exceptions import PreventUpdate
-from flask import Response
+from flask import Response, request
 from dash_auth_external import DashAuthExternal
 from requests.exceptions import ConnectTimeout, ConnectionError, HTTPError, ReadTimeout
 from werkzeug.exceptions import HTTPException
@@ -207,6 +207,25 @@ server = auth.server
 app = Dash(__name__, server=server)
 
 cached_df = pd.DataFrame()
+
+
+@server.before_request
+def show_oauth_callback_error():
+    if request.path.rstrip("/") != "/redirect":
+        return None
+
+    if request.args.get("code"):
+        return None
+
+    return oauth_error_response(
+        status_code=400,
+        heading="OAuth Callback Error",
+        message=(
+            "The OAuth provider redirected back to the app without an "
+            "authorization code."
+        ),
+        detail=dict(request.args),
+    )
 
 
 @server.errorhandler(HTTPError)
