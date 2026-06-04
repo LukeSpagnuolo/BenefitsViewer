@@ -19,11 +19,47 @@ dash.register_page(__name__, path="/home")
 PAGE_LIMIT = 100
 DEFAULT_PAGE_SIZE = 25
 
+PARTNER_COLUMNS = [
+    "id",
+    "created_at",
+    "updated_at",
+    "name",
+    "description",
+    "logo",
+    "address_line_1",
+    "address_line_2",
+    "city",
+    "state_or_province",
+    "postal_code",
+    "country",
+    "url",
+    "created_by",
+    "updated_by",
+    "updated_by_profile",
+    "institutions",
+    "relevant_campuses",
+]
+
+PARTNER_DEFAULT_COLUMNS = [
+    "name",
+    "description",
+    "address_line_1",
+    "city",
+    "state_or_province",
+    "postal_code",
+    "country",
+    "url",
+    "institutions",
+    "relevant_campuses",
+]
+
 SOURCES = {
     "partners": {
         "label": "Partners",
         "endpoint": BENEFITS_PARTNERS_ENDPOINT,
         "filename": "benefits_partners",
+        "columns": PARTNER_COLUMNS,
+        "default_columns": PARTNER_DEFAULT_COLUMNS,
     },
     "redemptions": {
         "label": "Redemptions",
@@ -78,6 +114,15 @@ def _columns_from_rows(rows):
     return columns
 
 
+def _available_columns(cfg, rows):
+    return list(cfg.get("columns") or _columns_from_rows(rows))
+
+
+def _default_columns(cfg, available_columns):
+    defaults = cfg.get("default_columns") or available_columns
+    return [column for column in defaults if column in available_columns]
+
+
 def _column_options(columns):
     return [{"label": column, "value": column} for column in columns]
 
@@ -90,34 +135,34 @@ def _subset_rows(rows, columns):
     return [{column: row.get(column, "") for column in columns} for row in rows]
 
 
-def fetch_paginated(endpoint, token):
+def fetch_benefits_page(endpoint, token, source_key):
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     url = SITE_URL.rstrip("/") + endpoint
     params = {"limit": PAGE_LIMIT}
-    rows = []
 
-    while url:
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
-        payload = response.json()
-        params = None
+    response = requests.get(url, headers=headers, params=params, timeout=60)
+    response.raise_for_status()
+    payload = response.json()
 
-        if isinstance(payload, dict) and "results" in payload:
-            rows.extend(payload.get("results") or [])
-            url = payload.get("next")
-            continue
+    total = None
+    has_more = False
 
-        if isinstance(payload, list):
-            rows.extend(payload)
-            break
+    if isinstance(payload, dict) and "results" in payload:
+        rows = payload.get("results") or []
+        total = payload.get("count")
+        has_more = bool(payload.get("next"))
+    elif isinstance(payload, dict) and isinstance(payload.get(source_key), list):
+        rows = payload.get(source_key) or []
+    elif isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        rows = payload.get("data") or []
+    elif isinstance(payload, list):
+        rows = payload
+    elif isinstance(payload, dict):
+        rows = [payload]
+    else:
+        rows = []
 
-        if isinstance(payload, dict):
-            rows.append(payload)
-            break
-
-        break
-
-    return [_flatten_json(row) for row in rows]
+    return [_flatten_json(row) for row in rows], total, has_more
 
 
 fields_layout = [
@@ -132,8 +177,7 @@ fields_layout = [
             "maxHeight": "60vh",
             "overflowY": "auto",
         },
-        persistence=True,
-        persistence_type="local",
+        persistence=False,
     ),
     dbc.Button("Apply Fields", id="apply-columns", color="primary", className="mt-3"),
 ]
@@ -153,6 +197,7 @@ layout = dbc.Container(
         dcc.Store(id="benefits-rows-store", data=[]),
         dcc.Store(id="available-columns-store", data=[]),
         dcc.Store(id="applied-columns-store", data=[]),
+        dcc.Store(id="active-source-store", data="partners"),
         dcc.Download(id="download-csv"),
 
         html.Div(
@@ -252,6 +297,7 @@ layout = dbc.Container(
 @dash.callback(
     Output("benefits-rows-store", "data"),
     Output("available-columns-store", "data"),
+    Output("active-source-store", "data"),
     Output("columns-select", "options"),
     Output("columns-select", "value"),
     Output("applied-columns-store", "data"),
@@ -269,27 +315,34 @@ def load_benefits_rows(source_key, _refresh_clicks, selected_columns):
     try:
         token = auth.get_token()
     except Exception:
-        return [], [], [], [], [], "No access token yet.", "warning", True
+        return [], [], source_key, [], [], [], "No access token yet.", "warning", True
 
     try:
-        rows = fetch_paginated(cfg["endpoint"], token)
+        rows, total, has_more = fetch_benefits_page(cfg["endpoint"], token, source_key)
     except requests.RequestException as exc:
-        return [], [], [], [], [], f"Could not load {cfg['label']}: {exc}", "danger", True
+        return [], [], source_key, [], [], [], f"Could not load {cfg['label']}: {exc}", "danger", True
     except Exception as exc:
-        return [], [], [], [], [], f"Unexpected error loading {cfg['label']}: {exc}", "danger", True
+        return [], [], source_key, [], [], [], f"Unexpected error loading {cfg['label']}: {exc}", "danger", True
 
-    columns = _columns_from_rows(rows)
+    columns = _available_columns(cfg, rows)
+    defaults = _default_columns(cfg, columns)
     selected = [column for column in (selected_columns or []) if column in columns]
     if not selected:
-        selected = columns
+        selected = defaults or columns
+
+    if total is not None and has_more:
+        message = f"Loaded first {len(rows)} of {total} {cfg['label'].lower()} rows."
+    else:
+        message = f"Loaded {len(rows)} {cfg['label'].lower()} rows."
 
     return (
         rows,
         columns,
+        source_key,
         _column_options(columns),
         selected,
         selected,
-        f"Loaded {len(rows)} {cfg['label'].lower()} rows.",
+        message,
         "success",
         True,
     )
@@ -301,11 +354,13 @@ def load_benefits_rows(source_key, _refresh_clicks, selected_columns):
     Input("apply-columns", "n_clicks"),
     State("columns-select", "value"),
     State("available-columns-store", "data"),
+    State("active-source-store", "data"),
     prevent_initial_call=True,
 )
-def apply_columns(_n, columns_value, available_columns):
+def apply_columns(_n, columns_value, available_columns, source_key):
+    cfg = _source_config(source_key)
     applied = [column for column in (columns_value or []) if column in (available_columns or [])]
-    return applied or (available_columns or []), False
+    return applied or _default_columns(cfg, available_columns or []), False
 
 
 @dash.callback(

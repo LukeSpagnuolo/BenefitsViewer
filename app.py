@@ -52,6 +52,10 @@ REQUIRED_CONFIG = (
 )
 MISSING_CONFIG = missing_config(REQUIRED_CONFIG)
 
+HERE = os.path.dirname(os.path.abspath(__file__))
+server.static_folder = os.path.join(HERE, "assets")
+server.static_url_path = "/assets"
+
 
 app = Dash(
     __name__,
