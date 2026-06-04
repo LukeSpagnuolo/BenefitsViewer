@@ -81,6 +81,7 @@ SOURCES = {
         "columns": REDEMPTION_SUMMARY_COLUMNS,
         "default_columns": REDEMPTION_SUMMARY_COLUMNS,
         "summary": True,
+        "bounded_summary": True,
     },
 }
 
@@ -292,17 +293,12 @@ def fetch_redemptions_summary(endpoint, token, partner_value=None):
     raw_rows = []
     total = None
 
-    while url:
-        response = requests.get(url, headers=headers, params=params, timeout=60)
-        response.raise_for_status()
-        page_rows, page_total, next_url = _extract_rows(response.json(), "redemptions")
-        total = page_total if page_total is not None else total
-        raw_rows.extend(_flatten_json(row) for row in page_rows)
+    response = requests.get(url, headers=headers, params=params, timeout=30)
+    response.raise_for_status()
+    page_rows, total, next_url = _extract_rows(response.json(), "redemptions")
+    raw_rows.extend(_flatten_json(row) for row in page_rows)
 
-        url = next_url
-        params = None
-
-    return summarize_redemptions(raw_rows), total, False, len(raw_rows)
+    return summarize_redemptions(raw_rows), total, bool(next_url), len(raw_rows)
 
 
 def fetch_benefits_page(endpoint, token, source_key, partner_value=None):
@@ -556,11 +552,14 @@ def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_colu
     if cfg.get("summary"):
         if total is not None and has_more:
             message = (
-                f"Summarized first {raw_count} of {total} "
-                f"{cfg['label'].lower()} into {len(rows)} groups."
+                f"Summarized first {raw_count} of {total} selected-partner "
+                f"{cfg['label'].lower()} into {len(rows)} row."
             )
         else:
-            message = f"Summarized {raw_count} {cfg['label'].lower()} into {len(rows)} groups."
+            message = (
+                f"Summarized {raw_count} selected-partner "
+                f"{cfg['label'].lower()} into {len(rows)} row."
+            )
     elif total is not None and has_more:
         message = f"Loaded first {len(rows)} of {total} {cfg['label'].lower()} rows."
     else:

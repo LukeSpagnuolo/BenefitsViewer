@@ -114,7 +114,7 @@ def oauth_error_response(status_code, heading, message, detail):
 
 @server.before_request
 def show_oauth_callback_error():
-    if request.path.rstrip("/") != "/redirect":
+    if not request.path.rstrip("/").endswith("/redirect"):
         return None
 
     if request.args.get("code"):
