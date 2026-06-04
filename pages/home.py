@@ -11,6 +11,7 @@ import requests
 from auth_setup import auth
 from layout.offcanvas import OffcanvasComponent
 from settings import (
+    BENEFITS_BENEFITS_ENDPOINT,
     BENEFITS_PARTNERS_ENDPOINT,
     BENEFITS_REDEMPTIONS_ENDPOINT,
     SITE_URL,
@@ -84,11 +85,10 @@ REDEMPTION_SUMMARY_COLUMNS = [
 
 SOURCES = {
     "partners": {
-        "label": "Partners",
-        "endpoint": BENEFITS_PARTNERS_ENDPOINT,
-        "filename": "benefits_partners",
-        "columns": PARTNER_COLUMNS,
-        "default_columns": PARTNER_DEFAULT_COLUMNS,
+        "label": "Benefits",
+        "endpoint": BENEFITS_BENEFITS_ENDPOINT,
+        "filename": "benefits",
+        "payload_key": "benefits",
     },
     "redemptions": {
         "label": "Redemptions",
@@ -374,7 +374,7 @@ def fetch_benefits_page(endpoint, token, source_key, partner_value=None):
     response.raise_for_status()
     payload = response.json()
 
-    rows, total, next_url = _extract_rows(payload, source_key)
+    rows, total, next_url = _extract_rows(payload, cfg.get("payload_key", source_key))
 
     rows = [_apply_column_mappings(_flatten_json(row)) for row in rows]
     return rows, total, bool(next_url), len(rows), [], None
