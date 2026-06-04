@@ -10,7 +10,12 @@ import requests
 
 from auth_setup import auth
 from layout.offcanvas import OffcanvasComponent
-from settings import BENEFITS_PARTNERS_ENDPOINT, BENEFITS_REDEMPTIONS_ENDPOINT, SITE_URL
+from settings import (
+    BENEFITS_PARTNERS_ENDPOINT,
+    BENEFITS_REDEMPTIONS_ENDPOINT,
+    BENEFITS_REDEMPTIONS_PARTNER_FILTER,
+    SITE_URL,
+)
 
 
 dash.register_page(__name__, path="/home")
@@ -146,6 +151,14 @@ def _subset_rows(rows, columns):
     return [{column: row.get(column, "") for column in columns} for row in rows]
 
 
+def _option_value(row, *keys):
+    for key in keys:
+        value = row.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
 def _first_value(row, candidates, default=""):
     for key in candidates:
         value = row.get(key)
@@ -240,10 +253,42 @@ def _extract_rows(payload, source_key):
     return [], None, None
 
 
-def fetch_redemptions_summary(endpoint, token):
+def fetch_partner_options(token):
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    url = SITE_URL.rstrip("/") + BENEFITS_PARTNERS_ENDPOINT
+    params = {"limit": SUMMARY_PAGE_LIMIT}
+    options = []
+    seen = set()
+
+    while url:
+        response = requests.get(url, headers=headers, params=params, timeout=60)
+        response.raise_for_status()
+        page_rows, _total, next_url = _extract_rows(response.json(), "partners")
+
+        for raw_row in page_rows:
+            row = _flatten_json(raw_row)
+            label = _option_value(row, "name")
+            if "name" in BENEFITS_REDEMPTIONS_PARTNER_FILTER:
+                value = _option_value(row, "name", "id")
+            else:
+                value = _option_value(row, "id", "name")
+            if not label or not value or value in seen:
+                continue
+            options.append({"label": label, "value": value})
+            seen.add(value)
+
+        url = next_url
+        params = None
+
+    return sorted(options, key=lambda option: option["label"].lower())
+
+
+def fetch_redemptions_summary(endpoint, token, partner_value=None):
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     url = SITE_URL.rstrip("/") + endpoint
     params = {"limit": SUMMARY_PAGE_LIMIT}
+    if partner_value:
+        params[BENEFITS_REDEMPTIONS_PARTNER_FILTER] = partner_value
     raw_rows = []
     total = None
 
@@ -260,10 +305,10 @@ def fetch_redemptions_summary(endpoint, token):
     return summarize_redemptions(raw_rows), total, False, len(raw_rows)
 
 
-def fetch_benefits_page(endpoint, token, source_key):
+def fetch_benefits_page(endpoint, token, source_key, partner_value=None):
     cfg = _source_config(source_key)
     if cfg.get("summary"):
-        return fetch_redemptions_summary(endpoint, token)
+        return fetch_redemptions_summary(endpoint, token, partner_value=partner_value)
 
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     url = SITE_URL.rstrip("/") + endpoint
@@ -372,6 +417,22 @@ layout = dbc.Container(
             className="mb-3",
         ),
 
+        html.Div(
+            [
+                dbc.Label("Partner", className="mb-1"),
+                dcc.Dropdown(
+                    id="redemptions-partner-select",
+                    options=[],
+                    value=None,
+                    clearable=True,
+                    placeholder="Select a partner...",
+                ),
+            ],
+            id="redemptions-partner-control",
+            className="mb-3",
+            style={"display": "none"},
+        ),
+
         fields_panel.offcanvas,
 
         dash_table.DataTable(
@@ -409,6 +470,33 @@ layout = dbc.Container(
 
 
 @dash.callback(
+    Output("redemptions-partner-select", "options"),
+    Input("benefits-source-tabs", "active_tab"),
+    prevent_initial_call=False,
+)
+def load_redemptions_partner_options(_source_key):
+    try:
+        token = auth.get_token()
+    except Exception:
+        return []
+
+    try:
+        return fetch_partner_options(token)
+    except requests.RequestException:
+        return []
+
+
+@dash.callback(
+    Output("redemptions-partner-control", "style"),
+    Input("benefits-source-tabs", "active_tab"),
+)
+def toggle_redemptions_partner_control(source_key):
+    if source_key == "redemptions":
+        return {"display": "block"}
+    return {"display": "none"}
+
+
+@dash.callback(
     Output("benefits-rows-store", "data"),
     Output("available-columns-store", "data"),
     Output("active-source-store", "data"),
@@ -420,11 +508,27 @@ layout = dbc.Container(
     Output("rows-toast", "is_open"),
     Input("benefits-source-tabs", "active_tab"),
     Input("refresh-data-btn", "n_clicks"),
+    Input("redemptions-partner-select", "value"),
     State("columns-select", "value"),
     prevent_initial_call=False,
 )
-def load_benefits_rows(source_key, _refresh_clicks, selected_columns):
+def load_benefits_rows(source_key, _refresh_clicks, partner_value, selected_columns):
     cfg = _source_config(source_key)
+    columns = _available_columns(cfg, [])
+    defaults = _default_columns(cfg, columns)
+
+    if cfg.get("summary") and not partner_value:
+        return (
+            [],
+            columns,
+            source_key,
+            _column_options(columns),
+            defaults,
+            defaults,
+            "Select a partner to load redemptions.",
+            "info",
+            True,
+        )
 
     try:
         token = auth.get_token()
@@ -432,7 +536,12 @@ def load_benefits_rows(source_key, _refresh_clicks, selected_columns):
         return [], [], source_key, [], [], [], "No access token yet.", "warning", True
 
     try:
-        rows, total, has_more, raw_count = fetch_benefits_page(cfg["endpoint"], token, source_key)
+        rows, total, has_more, raw_count = fetch_benefits_page(
+            cfg["endpoint"],
+            token,
+            source_key,
+            partner_value=partner_value,
+        )
     except requests.RequestException as exc:
         return [], [], source_key, [], [], [], f"Could not load {cfg['label']}: {exc}", "danger", True
     except Exception as exc:
