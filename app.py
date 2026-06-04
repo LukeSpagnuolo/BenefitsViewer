@@ -11,13 +11,16 @@ import json
 import os
 import random
 import time
+from html import escape as html_escape
 
 import pandas as pd
 import requests
 from dash import Dash, Input, Output, dash_table, html
 from dash.exceptions import PreventUpdate
+from flask import Response
 from dash_auth_external import DashAuthExternal
-from requests.exceptions import ConnectTimeout, ConnectionError, ReadTimeout
+from requests.exceptions import ConnectTimeout, ConnectionError, HTTPError, ReadTimeout
+from werkzeug.exceptions import HTTPException
 
 
 def env(*names, default=None):
@@ -204,6 +207,58 @@ server = auth.server
 app = Dash(__name__, server=server)
 
 cached_df = pd.DataFrame()
+
+
+@server.errorhandler(HTTPError)
+def oauth_http_error(error):
+    response = error.response
+    status_code = response.status_code if response is not None else 500
+    detail = response.text if response is not None else str(error)
+    return oauth_error_response(
+        status_code=status_code,
+        heading="OAuth Error",
+        message="The OAuth server rejected the request while this app was logging in.",
+        detail=detail,
+    )
+
+
+@server.errorhandler(Exception)
+def app_error(error):
+    if isinstance(error, HTTPException):
+        return error
+
+    return oauth_error_response(
+        status_code=500,
+        heading="Application Error",
+        message="The app hit an error while handling this request.",
+        detail=f"{type(error).__name__}: {error}",
+    )
+
+
+def oauth_error_response(status_code, heading, message, detail):
+    body = f"""<!doctype html>
+<html>
+  <head>
+    <title>Benefits Viewer Error</title>
+    <style>
+      body {{ font-family: Arial, sans-serif; margin: 2rem; line-height: 1.4; }}
+      pre {{ background: #f6f6f6; padding: 1rem; overflow-x: auto; }}
+    </style>
+  </head>
+  <body>
+    <h1>{html_escape(heading)}</h1>
+    <p>{html_escape(message)}</p>
+    <p><strong>Status:</strong> {status_code}</p>
+    <p><strong>Authorization URL:</strong> {html_escape(AUTH_URL)}</p>
+    <p><strong>Token URL:</strong> {html_escape(TOKEN_URL)}</p>
+    <p><strong>App URL:</strong> {html_escape(APP_URL)}</p>
+    <p><strong>Redirect URL:</strong> {html_escape(APP_URL)}/redirect</p>
+    <p><strong>Client ID length:</strong> {len(CLIENT_ID)}</p>
+    <h2>Detail</h2>
+    <pre>{html_escape(safe_str(detail))}</pre>
+  </body>
+</html>"""
+    return Response(body, status=status_code, mimetype="text/html")
 
 
 # -------------------------------------------------------------------------
